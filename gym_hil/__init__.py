@@ -44,6 +44,13 @@ register(
     max_episode_steps=100,
 )
 
+
+register( #JustinF02 registered new env
+    id="gym_hil/PandaStackCubesBase-v0",
+    entry_point="gym_hil.envs:PandaStackCubesGymEnv",
+    max_episode_steps=100,
+)
+
 # Register the viewer wrapper
 register(
     id="gym_hil/PandaPickCubeViewer-v0",
@@ -54,6 +61,12 @@ register(
 register(
     id="gym_hil/PandaArrangeBoxesViewer-v0",
     entry_point=lambda **kwargs: PassiveViewerWrapper(gym.make("gym_hil/PandaArrangeBoxesBase-v0", **kwargs)),
+    max_episode_steps=100,
+)
+
+register(
+    id="gym_hil/PandaStackCubesViewer-v0",
+    entry_point=lambda **kwargs: PassiveViewerWrapper(gym.make("gym_hil/PandaStackCubesBase-v0", **kwargs)),
     max_episode_steps=100,
 )
 
@@ -114,4 +127,36 @@ register(
     entry_point="gym_hil.wrappers.factory:make_env",
     max_episode_steps=100,
     kwargs={"env_id": "gym_hil/PandaArrangeBoxesBase-v0", "use_viewer": True, "gripper_penalty": -0.05},
+)
+
+#JFD4 Factory uses for new env
+register(
+    id="gym_hil/PandaStackCubes-v0",
+    entry_point="gym_hil.wrappers.factory:make_env",
+    max_episode_steps=100,
+    kwargs={
+        "env_id": "gym_hil/PandaStackCubesBase-v0",  # Use the base environment
+    },
+)
+
+register(
+    id="gym_hil/PandaStackCubesGamepad-v0",
+    entry_point="gym_hil.wrappers.factory:make_env",
+    max_episode_steps=100,
+    kwargs={
+        "env_id": "gym_hil/PandaStackCubesBase-v0",  # Use the base environment
+        "use_viewer": True,
+        "use_gamepad": True,
+    },
+)
+
+register(
+    id="gym_hil/PandaStackCubesKeyboard-v0",
+    entry_point="gym_hil.wrappers.factory:make_env",
+    max_episode_steps=100,
+    kwargs={
+        "env_id": "gym_hil/PandaStackCubesBase-v0",  # Use the base environment
+        "use_viewer": True,
+        "gripper_penalty": -0.05,
+    },
 )
