@@ -15,7 +15,7 @@
 # limitations under the License.
 
 from typing import Any, Dict, Literal, Tuple
-
+import sys
 import mujoco
 import numpy as np
 from gymnasium import spaces
@@ -104,7 +104,7 @@ class PandaStackCubesGymEnv(FrankaGymEnv):
         """Reset the environment."""
         # Ensure gymnasium internal RNG is initialized when a seed is provided
         super().reset(seed=seed)
-
+        
         mujoco.mj_resetData(self._model, self._data)
 
         # Reset the robot to home position
@@ -137,7 +137,7 @@ class PandaStackCubesGymEnv(FrankaGymEnv):
             name = f"block{i}" if i > 0 else "block1"
             z = self._data.sensor(f"{name}_pos").data[2]
             self._z_inits.append(z)
-
+        self._prev_gripper_closed = False
         obs = self._compute_observation()
         return obs, {}
 
@@ -191,30 +191,29 @@ class PandaStackCubesGymEnv(FrankaGymEnv):
 
         return observation
 
-    def _check_stacking(self):
-        """Check if any two blocks are properly stacked."""
-        positions = [
-            self._data.sensor(f"block{i}_pos" if i > 0 else "block1_pos").data.copy()
-            for i in range(self.num_blocks)
-        ]
+    def _is_gripper_closed(self) -> bool:
+        """Check if gripper is closed (holding something)."""
+        left_finger = self._data.joint("left_driver_joint").qpos[0]
+        right_finger = self._data.joint("right_driver_joint").qpos[0]
         
-        for i in range(self.num_blocks):
-            for j in range(self.num_blocks):
-                if i == j:
-                    continue
-                    
-                upper = positions[i]
-                lower = positions[j]
-                
-                xy_dist = np.linalg.norm(upper[:2] - lower[:2])
-                z_diff = upper[2] - lower[2]
-                
-                # Check if upper block is on top of lower block
-                if xy_dist < 0.05 and abs(z_diff - self._block_z * 2) < 0.03:
-                    return True
+        # The gripper is synchronized (same value for both), so we can use just one
+        # Gripper is closed when the joint position is higher (fingers closer)
+        gripper_position = left_finger  # or right_finger, they should be the same
+
+    def _was_block_just_released(self) -> bool:
+        """Check if a block was just released from gripper."""
+        # Store previous gripper state
+        if not hasattr(self, '_prev_gripper_closed'):
+            self._prev_gripper_closed = self._is_gripper_closed()
+            return False
         
-        return False
-    
+        current_closed = self._is_gripper_closed()
+        just_released = self._prev_gripper_closed and not current_closed
+        self._prev_gripper_closed = current_closed
+        
+        return just_released
+
+    #one main issue : if the cube rotates, the computed value is offset.
     def _compute_reward(self) -> float:
         """Compute reward based on stacking progress."""
         if self.reward_type == "dense":
@@ -223,7 +222,7 @@ class PandaStackCubesGymEnv(FrankaGymEnv):
             
             # Get all block positions
             block_positions = [
-                self._data.sensor(f"block{i}_pos" if i > 0 else "block1_pos").data
+                self._data.sensor(f"block{i + 1}_pos").data
                 for i in range(self.num_blocks)
             ]
             
@@ -234,41 +233,67 @@ class PandaStackCubesGymEnv(FrankaGymEnv):
                 lift_reward = np.clip(lift, 0.0, 1.0)
                 max_lift_reward = max(max_lift_reward, lift_reward)
             
-            # Reward for stacking
-            stack_reward = 1.0 if self._check_stacking() else 0.0
+            # Reward for stacking, bigger if block has been released after stacked
+            stack_reward = 0.0
+            if self._was_block_just_released() and self._is_success():
+                stack_reward = 2.0  # Big reward for successful release
+            elif self._is_success():
+                stack_reward = 0.5  # Smaller reward if stacked but still holding
             
             return 0.3 * max_lift_reward + 0.7 * stack_reward
         else:
-            # Sparse reward: only when stacked
-            return 1.0 if self._check_stacking() else 0.0
+            # Sparse reward: only when released AND stacked
+            if self._was_block_just_released() and self._is_success():
+                return 1.0
+            return 0.0
 
     def _is_success(self) -> bool:
         """Check if task is successfully completed (strict criteria)."""
-        if not self._check_stacking():
-            return False
         
         # Additional stability check: stacked blocks should be stable
         positions = [
-            self._data.sensor(f"block{i}_pos" if i > 0 else "block1_pos").data.copy()
+            self._data.sensor(f"block{i + 1}_pos").data.copy()
             for i in range(self.num_blocks)
         ]
         
+        stacked = False
+        log_lines = []
+
+        for i in range(self.num_blocks):
+            name = f"block{i + 1}"  # start at block1
+            qpos = self._data.joint(name).qpos[:3]
+            log_lines.append(f"  - {name}: {np.array2string(qpos, precision=4)}")
+        log_lines.append("")
+
         for i in range(self.num_blocks):
             for j in range(self.num_blocks):
                 if i == j:
                     continue
-                    
+                
                 upper = positions[i]
                 lower = positions[j]
                 
                 xy_dist = np.linalg.norm(upper[:2] - lower[:2])
                 z_diff = upper[2] - lower[2]
-                
+                target_z = self._block_z * 1
+
+                log_lines.append(
+                    f"Block {i + 1} over {j+1} | xy={xy_dist:.4f}, z={z_diff:.4f} (target={target_z:.4f})"
+                )
+
+
                 # Stricter criteria for success
-                if xy_dist < 0.03 and abs(z_diff - self._block_z * 2) < 0.02:
-                    return True
-        
-        return False
+                if xy_dist < 0.05 and abs(z_diff - self._block_z * 2) < 0.03:
+                    stacked = True
+                    log_lines.append(f"block{i} is stacked on block{j}")
+                    break
+            if stacked:
+                break
+        sys.stdout.write("\x1b[2J\x1b[H")  # clear screen and go to top left
+        for line in log_lines:
+            print(line)
+
+        return stacked
 
 
 if __name__ == "__main__":
