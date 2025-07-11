@@ -128,10 +128,7 @@ class PandaStackCubesGymEnv(FrankaGymEnv):
 
             self._data.joint(name).qpos[:3] = (*block_xy, self._block_z)
 
-        #JFD4 only first cube sensor is retrieved, provide more variables for getting each one (or array)
-        # Cache the initial block1 height
-        # self._z_init = self._data.sensor("block1_pos").data[2]
-        # self._z_success = self._z_init + 0.1
+        
         self._z_inits = []
         for i in range(self.num_blocks):
             name = f"block{i}" if i > 0 else "block1"
@@ -154,13 +151,14 @@ class PandaStackCubesGymEnv(FrankaGymEnv):
         if self.reward_type == "sparse":
             success = rew == 1.0
 
+        terminated = bool(success)
         # Check if block1 is outside bounds
         block1_pos = self._data.sensor("block1_pos").data
         exceeded_bounds = np.any(block1_pos[:2] < (_SAMPLING_BOUNDS[0] - 0.05)) or np.any(
             block1_pos[:2] > (_SAMPLING_BOUNDS[1] + 0.05)
         )
 
-        terminated = bool(success or exceeded_bounds)
+        terminated = terminated or exceeded_bounds
 
         return obs, rew, terminated, False, {"succeed": success}
 
@@ -194,11 +192,13 @@ class PandaStackCubesGymEnv(FrankaGymEnv):
     def _is_gripper_closed(self) -> bool:
         """Check if gripper is closed (holding something)."""
         left_finger = self._data.joint("left_driver_joint").qpos[0]
-        right_finger = self._data.joint("right_driver_joint").qpos[0]
+        #right_finger = self._data.joint("right_driver_joint").qpos[0]
         
         # The gripper is synchronized (same value for both), so we can use just one
         # Gripper is closed when the joint position is higher (fingers closer)
         gripper_position = left_finger  # or right_finger, they should be the same
+
+        return gripper_position > 0.1
 
     def _was_block_just_released(self) -> bool:
         """Check if a block was just released from gripper."""
@@ -249,8 +249,6 @@ class PandaStackCubesGymEnv(FrankaGymEnv):
 
     def _is_success(self) -> bool:
         """Check if task is successfully completed (strict criteria)."""
-        
-        # Additional stability check: stacked blocks should be stable
         positions = [
             self._data.sensor(f"block{i + 1}_pos").data.copy()
             for i in range(self.num_blocks)
@@ -260,7 +258,7 @@ class PandaStackCubesGymEnv(FrankaGymEnv):
         log_lines = []
 
         for i in range(self.num_blocks):
-            name = f"block{i + 1}"  # start at block1
+            name = f"block{i + 1}"
             qpos = self._data.joint(name).qpos[:3]
             log_lines.append(f"  - {name}: {np.array2string(qpos, precision=4)}")
         log_lines.append("")
@@ -275,21 +273,23 @@ class PandaStackCubesGymEnv(FrankaGymEnv):
                 
                 xy_dist = np.linalg.norm(upper[:2] - lower[:2])
                 z_diff = upper[2] - lower[2]
-                target_z = self._block_z * 1
+                target_z = self._block_z * 2
 
                 log_lines.append(
                     f"Block {i + 1} over {j+1} | xy={xy_dist:.4f}, z={z_diff:.4f} (target={target_z:.4f})"
                 )
 
-
-                # Stricter criteria for success
-                if xy_dist < 0.05 and abs(z_diff - self._block_z * 2) < 0.03:
+                
+                if (xy_dist < 0.030 and # cube is 0.25 wide, detect if it is above another
+                    z_diff > 0.03 and   # verify that it is above the other in z value
+                    abs(z_diff - self._block_z * 2) < 0.05):
                     stacked = True
-                    log_lines.append(f"block{i} is stacked on block{j}")
+                    log_lines.append(f"block{i+1} is stacked on block{j+1}")
                     break
             if stacked:
                 break
-        sys.stdout.write("\x1b[2J\x1b[H")  # clear screen and go to top left
+        
+        sys.stdout.write("\x1b[2J\x1b[H")
         for line in log_lines:
             print(line)
 
