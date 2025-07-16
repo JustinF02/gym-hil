@@ -153,7 +153,7 @@ register(
 register(
     id="gym_hil/PandaStackCubesKeyboard-v0",
     entry_point="gym_hil.wrappers.factory:make_env",
-    max_episode_steps=100,
+    max_episode_steps=250,
     kwargs={
         "env_id": "gym_hil/PandaStackCubesBase-v0",  # Use the base environment
         "use_viewer": True,

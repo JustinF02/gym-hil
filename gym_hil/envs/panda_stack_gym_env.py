@@ -157,7 +157,7 @@ class PandaStackCubesGymEnv(FrankaGymEnv):
         exceeded_bounds = np.any(block1_pos[:2] < (_SAMPLING_BOUNDS[0] - 0.05)) or np.any(
             block1_pos[:2] > (_SAMPLING_BOUNDS[1] + 0.05)
         )
-
+        
         terminated = terminated or exceeded_bounds
 
         return obs, rew, terminated, False, {"succeed": success}
@@ -217,8 +217,6 @@ class PandaStackCubesGymEnv(FrankaGymEnv):
     def _compute_reward(self) -> float:
         """Compute reward based on stacking progress."""
         if self.reward_type == "dense":
-            # Dense reward: encourage picking up and stacking
-            tcp_pos = self._data.sensor("2f85/pinch_pos").data
             
             # Get all block positions
             block_positions = [
@@ -226,7 +224,7 @@ class PandaStackCubesGymEnv(FrankaGymEnv):
                 for i in range(self.num_blocks)
             ]
             
-            # Reward for lifting any block
+            # Reward for lifting any block, the max reward is kept (should be the block currently lifted)
             max_lift_reward = 0.0
             for i, pos in enumerate(block_positions):
                 lift = (pos[2] - self._z_inits[i]) / (self._block_z * 2)
@@ -240,6 +238,7 @@ class PandaStackCubesGymEnv(FrankaGymEnv):
             elif self._is_success():
                 stack_reward = 0.5  # Smaller reward if stacked but still holding
             
+            # 30% for lifting + 70% for stacking.
             return 0.3 * max_lift_reward + 0.7 * stack_reward
         else:
             # Sparse reward: only when released AND stacked
